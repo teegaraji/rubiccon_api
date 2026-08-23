@@ -1,11 +1,16 @@
 # Rubiccon Backend API (FastAPI & Kociemba Solver)
 
-> High-performance microservice providing Rubik's Cube 3x3 mathematical state validation and solving capabilities powered by **FastAPI** and the **Kociemba Two-Phase Algorithm**.
+> High-performance microservice providing Rubik's Cube 3x3 real-time computer vision frame analysis, mathematical state validation, and solving capabilities powered by **FastAPI** and the **Kociemba Two-Phase Algorithm**.
 
 ---
 
 ## 🚀 Features
 
+- **Real-Time Vision Streaming via WebSocket (`/api/v1/ws/vision`)**:
+  - Continuous camera frame processing (10–15 FPS) with 3x3 tile HSV/RGB color classification.
+  - Interactive ROI alignment & stability score calculation (`isReadyToLock`).
+  - Face state persistence (`init_session`, `set_active_face`, `lock_face`, `reset_session`).
+  - Automatic completion trigger (`session_completed`) returning validated 54-char string.
 - **Standard RESTful Endpoints (`/api/v1`)**:
   - `POST /api/v1/solve`: Computes optimal/sub-optimal move sequences with direction, rotation angle, and bilingual guidance (English & Indonesian).
   - `POST /api/v1/validate`: Pre-flight validation (character integrity, tile counts, centers invariant, edge/corner parity).
@@ -21,6 +26,7 @@
 - **Language**: Python 3.12+
 - **Framework**: [FastAPI](https://fastapi.tiangolo.com/)
 - **Data Validation & Settings**: [Pydantic v2](https://docs.pydantic.dev/) & `pydantic-settings`
+- **Computer Vision**: [Pillow](https://python-pillow.org/) & [NumPy](https://numpy.org/)
 - **Solver Engine**: [Kociemba Two-Phase Algorithm](https://github.com/muodov/kociemba)
 - **ASGI Server**: [Uvicorn](https://www.uvicorn.org/)
 - **Testing & Quality**: [pytest](https://pytest.org/), [httpx](https://www.python-httpx.org/), [ruff](https://docs.astral.sh/ruff/)
@@ -90,7 +96,24 @@ ruff check --fix .
 
 ## 📡 API Reference
 
-### `POST /api/v1/solve`
+### 1. Real-Time Vision WebSocket (`ws://localhost:8000/api/v1/ws/vision`)
+
+**Client Upstream Actions**:
+- `init_session`: `{ "action": "init_session", "sessionId": "...", "initialFace": "Front" }`
+- `process_frame`: `{ "action": "process_frame", "frameId": 1, "activeFace": "Front", "timestamp": 1724426400, "image": "data:image/jpeg;base64,..." }`
+- `set_active_face`: `{ "action": "set_active_face", "face": "Right" }`
+- `lock_face`: `{ "action": "lock_face", "face": "Front", "overrideTiles": null }`
+- `reset_session`: `{ "action": "reset_session" }`
+
+**Server Downstream Events**:
+- `detection_result`: Returns 9 tile colors, hex, HSV/RGB values, stability score, and `isReadyToLock`.
+- `face_locked`: Confirms face lock, returns completed faces and `nextSuggestedFace`.
+- `session_completed`: Emitted when all 6 faces are mapped, returns 54-char string & validity status.
+- `vision_error`: Emitted on malformed frames or processing errors.
+
+### 2. REST Endpoints
+
+#### `POST /api/v1/solve`
 Computes the move sequence to solve the cube.
 
 **Request:**
@@ -102,37 +125,7 @@ Computes the move sequence to solve the cube.
 }
 ```
 
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "data": {
-    "isSolved": false,
-    "totalMoves": 21,
-    "solutionString": "B U' L' D' R' D' L2 D' L F' L' D F2 R2 U R2 B2 U2 L2 F2 D'",
-    "moves": [
-      {
-        "index": 1,
-        "notation": "B",
-        "face": "B",
-        "direction": "CW",
-        "angle": 90,
-        "instruction": "Rotate Back face clockwise 90°",
-        "humanGuidance": "Putar sisi BELAKANG searah jarum jam 90°"
-      }
-    ],
-    "phase1Depth": 8,
-    "phase2Depth": 13
-  },
-  "meta": {
-    "timestamp": "2026-08-23T14:20:00.000Z",
-    "executionTimeMs": 14.2,
-    "version": "1.0.0"
-  }
-}
-```
-
-### `POST /api/v1/validate`
+#### `POST /api/v1/validate`
 Validates a 54-character state string mathematically without calculating moves.
 
 **Request:**
@@ -141,6 +134,9 @@ Validates a 54-character state string mathematically without calculating moves.
   "state": "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
 }
 ```
+
+#### `GET /api/v1/health`
+Health check and microservice status.
 
 ---
 

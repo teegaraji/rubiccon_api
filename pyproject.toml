@@ -10,6 +10,8 @@ dependencies = [
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
     "kociemba>=1.2.1",
+    "pillow>=10.0.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]
