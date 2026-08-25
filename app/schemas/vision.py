@@ -48,6 +48,12 @@ class VisionInitSessionMessage(BaseModel):
     cubeType: Literal["3x3"] = "3x3"
     initialFace: CubeFaceName = "Front"
     colorScheme: Literal["western"] = "western"
+    calibrationPalette: dict[CubeFace, list[int]] | None = None
+
+
+class VisionCalibrateColorsMessage(BaseModel):
+    action: Literal["calibrate_colors"] = "calibrate_colors"
+    palette: dict[CubeFace, list[int]]
 
 
 class VisionProcessFrameMessage(BaseModel):
@@ -76,6 +82,7 @@ class VisionResetSessionMessage(BaseModel):
 
 VisionClientMessage = Annotated[
     VisionInitSessionMessage
+    | VisionCalibrateColorsMessage
     | VisionProcessFrameMessage
     | VisionSetActiveFaceMessage
     | VisionLockFaceMessage
@@ -127,6 +134,12 @@ class VisionSessionCompletedEvent(BaseModel):
     isFullyMapped: Literal[True] = True
     fullStateString: str
     isValid: bool
+
+
+class VisionColorCalibratedEvent(BaseModel):
+    event: Literal["color_calibrated"] = "color_calibrated"
+    calibratedPalette: dict[CubeFace, list[int]]
+    source: Literal["manual", "auto_center"] = "manual"
 
 
 class VisionErrorEvent(BaseModel):

@@ -5,6 +5,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from app.schemas.vision import (
+    VisionCalibrateColorsMessage,
     VisionErrorEvent,
     VisionInitSessionMessage,
     VisionLockFaceMessage,
@@ -44,11 +45,24 @@ async def vision_websocket_endpoint(websocket: WebSocket):
                     session = VisionSession(
                         session_id=init_msg.sessionId,
                         initial_face=init_msg.initialFace,
+                        calibration_palette=init_msg.calibrationPalette,
                     )
                 except ValidationError as e:
                     err_event = VisionErrorEvent(
                         code="INVALID_PAYLOAD",
                         message=f"Invalid init_session payload: {str(e)}",
+                    )
+                    await websocket.send_text(err_event.model_dump_json())
+
+            elif action == "calibrate_colors":
+                try:
+                    calib_msg = VisionCalibrateColorsMessage.model_validate(payload)
+                    calib_evt = session.calibrate_colors(calib_msg.palette)
+                    await websocket.send_text(calib_evt.model_dump_json())
+                except ValidationError as e:
+                    err_event = VisionErrorEvent(
+                        code="INVALID_PAYLOAD",
+                        message=f"Invalid calibrate_colors payload: {str(e)}",
                     )
                     await websocket.send_text(err_event.model_dump_json())
 

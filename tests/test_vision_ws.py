@@ -111,6 +111,57 @@ def test_vision_ws_lifecycle(client: TestClient):
         ws.send_text(json.dumps({"action": "reset_session"}))
 
 
+def test_vision_ws_calibration_lifecycle(client: TestClient):
+    with client.websocket_connect("/api/v1/ws/vision") as ws:
+        # 1. Initialize session with custom calibration palette
+        custom_palette = {
+            "U": [245, 240, 230],  # Warm white
+            "R": [14, 165, 233],   # Sky/Cyan Blue
+            "F": [244, 63, 94],    # Pinkish / Light Red
+            "D": [250, 204, 21],   # Pastel Yellow
+            "L": [34, 197, 94],    # Green
+            "B": [251, 146, 60],   # Light Orange
+        }
+        init_payload = {
+            "action": "init_session",
+            "sessionId": "test_calib_sess",
+            "cubeType": "3x3",
+            "initialFace": "Front",
+            "colorScheme": "western",
+            "calibrationPalette": custom_palette,
+        }
+        ws.send_text(json.dumps(init_payload))
+
+        # 2. Test explicit calibrate_colors action
+        new_palette = {
+            "U": [255, 255, 255],
+            "R": [0, 0, 255],
+            "F": [255, 0, 0],
+            "D": [255, 255, 0],
+            "L": [0, 255, 0],
+            "B": [255, 128, 0],
+        }
+        ws.send_text(json.dumps({"action": "calibrate_colors", "palette": new_palette}))
+        calib_res = json.loads(ws.receive_text())
+        assert calib_res["event"] == "color_calibrated"
+        assert calib_res["source"] == "manual"
+        assert calib_res["calibratedPalette"]["F"] == [255, 0, 0]
+
+        # 3. Process frame with pinkish red image -> matches F
+        img_b64 = create_sample_b64_image(color=(244, 63, 94))
+        frame_payload = {
+            "action": "process_frame",
+            "frameId": 10,
+            "activeFace": "Front",
+            "timestamp": 1724426400000,
+            "image": img_b64,
+        }
+        ws.send_text(json.dumps(frame_payload))
+        det_res = json.loads(ws.receive_text())
+        assert det_res["event"] == "detection_result"
+        assert det_res["tiles"][0]["faceletCode"] == "F"
+
+
 def test_vision_ws_invalid_messages(client: TestClient):
     with client.websocket_connect("/api/v1/ws/vision") as ws:
         # Send malformed JSON
@@ -130,3 +181,9 @@ def test_vision_ws_invalid_messages(client: TestClient):
         res = json.loads(ws.receive_text())
         assert res["event"] == "vision_error"
         assert res["code"] == "INVALID_PAYLOAD"
+
+        # Send invalid payload for calibrate_colors
+        ws.send_text(json.dumps({"action": "calibrate_colors", "palette": "not-a-dict"}))
+        res_calib = json.loads(ws.receive_text())
+        assert res_calib["event"] == "vision_error"
+        assert res_calib["code"] == "INVALID_PAYLOAD"
