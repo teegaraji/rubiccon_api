@@ -111,3 +111,4 @@ async def root():
         "api_v1": f"{settings.API_V1_PREFIX}/health",
         "ws_vision": f"ws://{settings.HOST}:{settings.PORT}{settings.API_V1_PREFIX}/ws/vision",
     }
+

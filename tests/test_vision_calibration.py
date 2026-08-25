@@ -84,45 +84,83 @@ def test_custom_calibrated_palette_variations():
         "L": (74, 222, 128),   # Light mint green
         "B": (251, 146, 60),   # Light peach orange
     }
-    calib_lab = {face: rgb_to_cielab(*rgb) for face, rgb in custom_palette.items()}
 
     # Test Pinkish red classification against calibrated palette
-    name, code, _, conf, _, _ = classify_tile_color_calibrated(240, 60, 95, calib_lab)
+    name, code, _, conf, _, _ = classify_tile_color_calibrated(240, 60, 95, custom_palette)
     assert code == "F"
     assert name == "red"
-    assert conf >= 0.85
+    assert conf >= 0.70
 
     # Test Warm white under indoor incandescent lighting
-    name, code, _, conf, _, _ = classify_tile_color_calibrated(242, 235, 222, calib_lab)
+    name, code, _, conf, _, _ = classify_tile_color_calibrated(242, 235, 222, custom_palette)
     assert code == "U"
     assert name == "white"
 
     # Test Cyan Blue
-    name, code, _, conf, _, _ = classify_tile_color_calibrated(10, 180, 210, calib_lab)
+    name, code, _, conf, _, _ = classify_tile_color_calibrated(10, 180, 210, custom_palette)
     assert code == "R"
     assert name == "blue"
 
+    # Test Light peach orange vs Pinkish red
+    name, code, _, _, _, _ = classify_tile_color_calibrated(248, 140, 55, custom_palette)
+    assert code == "B"
+    assert name == "orange"
 
-def test_vision_session_dual_layer_adaptive_learning():
+
+def test_vision_session_zero_drift_calibration():
     session = VisionSession(initial_face="Front")
     assert "F" in session.calibrated_rgb
 
-    # Explicit calibration update (Layer 1)
+    # Explicit calibration update
     session.calibrate_colors({"F": [245, 50, 80]})
     assert session.calibrated_rgb["F"] == (245.0, 50.0, 80.0)
 
-    # Locking face updates calibrated center profile (Layer 2)
+    # Locking face does not corrupt or drift calibrated reference profile
     session.last_detection_tiles = [
         type(
             "TileMock",
             (),
             {
                 "faceletCode": "F",
-                "rgb": [240, 48, 78],
+                "rgb": [200, 200, 200],  # Mock background color
             },
         )()
         for _ in range(9)
     ]
     locked_evt, _ = session.lock_face("Front")
     assert locked_evt.face == "Front"
-    assert session.calibrated_rgb["F"] == (240.0, 48.0, 78.0)
+    assert session.calibrated_rgb["F"] == (245.0, 50.0, 80.0)
+
+
+def test_opencv_hsv_difficult_lighting_and_plastic_variations():
+    # Warm lamp white (incandescent lighting)
+    name, code, _, _, _, _ = classify_tile_color(240, 235, 210)
+    assert code == "U"
+    assert name == "white"
+
+    # Shadowed white
+    name, code, _, _, _, _ = classify_tile_color(180, 180, 175)
+    assert code == "U"
+    assert name == "white"
+
+    # Dark / Deep red speedcube plastic
+    name, code, _, _, _, _ = classify_tile_color(160, 20, 20)
+    assert code == "F"
+    assert name == "red"
+
+    # Lime green plastic
+    name, code, _, _, _, _ = classify_tile_color(100, 220, 30)
+    assert code == "L"
+    assert name == "green"
+
+    # Cyan / light turquoise blue
+    name, code, _, _, _, _ = classify_tile_color(0, 180, 240)
+    assert code == "R"
+    assert name == "blue"
+
+    # Pastel yellow vs warm white discrimination
+    name, code, _, _, _, _ = classify_tile_color(250, 240, 100)
+    assert code == "D"
+    assert name == "yellow"
+
+

@@ -17,3 +17,5 @@ def test_root_endpoint(client):
     data = response.json()
     assert "service" in data
     assert "version" in data
+
+

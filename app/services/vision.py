@@ -1,10 +1,9 @@
 import base64
-import colorsys
 import io
-import math
 import time
 from collections import Counter, deque
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -54,7 +53,6 @@ DEFAULT_PALETTE_RGB: dict[CubeFace, tuple[int, int, int]] = {
 
 def rgb_to_cielab(r: float, g: float, b: float) -> tuple[float, float, float]:
     """Convert sRGB (0..255) to CIELAB (L*, a*, b*) under D65 standard illuminant."""
-    # 1. Linearize sRGB
     def pivot_rgb(c: float) -> float:
         c_norm = max(0.0, min(255.0, c)) / 255.0
         return c_norm / 12.92 if c_norm <= 0.04045 else ((c_norm + 0.055) / 1.055) ** 2.4
@@ -63,17 +61,14 @@ def rgb_to_cielab(r: float, g: float, b: float) -> tuple[float, float, float]:
     g_lin = pivot_rgb(g)
     b_lin = pivot_rgb(b)
 
-    # 2. Linear RGB to CIE XYZ (D65 illuminant matrix)
     x = r_lin * 0.4124564 + g_lin * 0.3575761 + b_lin * 0.1804375
     y = r_lin * 0.2126729 + g_lin * 0.7151522 + b_lin * 0.0721750
     z = r_lin * 0.0193339 + g_lin * 0.1191920 + b_lin * 0.9503041
 
-    # 3. Normalize for D65 standard reference white (Xn=0.95047, Yn=1.00000, Zn=1.08883)
     xr = x / 0.95047
     yr = y / 1.00000
     zr = z / 1.08883
 
-    # 4. Convert XYZ to CIELAB
     def pivot_xyz(t: float) -> float:
         return t ** (1.0 / 3.0) if t > 0.008856 else (7.787 * t) + (16.0 / 116.0)
 
@@ -88,76 +83,141 @@ def rgb_to_cielab(r: float, g: float, b: float) -> tuple[float, float, float]:
     return (l_val, a_val, b_val)
 
 
-def calculate_color_distance(
-    sample_lab: tuple[float, float, float],
-    prototype_lab: tuple[float, float, float],
-    is_white_prototype: bool = False,
-) -> float:
-    """Compute weighted perceptual distance in CIELAB color space.
+def classify_hsv_tile(
+    h_ocv: float,
+    s_ocv: float,
+    v_ocv: float,
+    r: float,
+    g: float,
+    b: float,
+    palette_rgb: dict[CubeFace, tuple[float, float, float]] | None = None,
+    palette_hex: dict[CubeFace, str] | None = None,
+) -> tuple[FaceletColor, CubeFace, str, float, list[int], list[int]]:
+    """Classify a single tile sample using OpenCV HSV Color Recognition:
 
-    Luminance (L*) weight is slightly reduced (0.6) to provide robustness against
-    surface lighting gradients and directional shadows.
+    OpenCV Ranges:
+      Hue (H):        0 .. 179  (integer-based circular color angle)
+      Saturation (S): 0 .. 255  (color purity / intensity)
+      Value (V):      0 .. 255  (brightness / lightness)
+
+    Stages:
+      Stage 1: White / Neutral Check (Low Saturation gate, invariant to warm lighting).
+      Stage 2: Explicit Custom Prototype Matching (if calibrated).
+      Stage 3: Angular Hue Sector Mapping in OpenCV scale + Red/Orange G/R discriminator.
     """
-    sl, sa, sb = sample_lab
-    pl, pa, pb = prototype_lab
+    hue_deg = int(round(h_ocv * 2.0))
+    sat_pct = int(round((s_ocv / 255.0) * 100.0))
+    val_pct = int(round((v_ocv / 255.0) * 100.0))
+    hsv_list = [hue_deg, sat_pct, val_pct]
+    rgb_list = [int(round(r)), int(round(g)), int(round(b))]
 
-    # If prototype is White, penalize excessive saturation/chroma
-    if is_white_prototype:
-        sample_chroma = math.sqrt(sa * sa + sb * sb)
-        # Moderate penalty if sample chroma exceeds neutral threshold
-        chroma_penalty = max(0.0, (sample_chroma - 20.0) * 1.5)
-        return math.sqrt(0.7 * (sl - pl) ** 2 + (sa - pa) ** 2 + (sb - pb) ** 2) + chroma_penalty
+    hex_map = palette_hex or FACE_CODE_TO_HEX
+    gr_ratio = (g + 1e-5) / (r + 1e-5)
 
-    return math.sqrt(0.6 * (sl - pl) ** 2 + (sa - pa) ** 2 + (sb - pb) ** 2)
+    # ----------------------------------------------------
+    # STAGE 1: White / Neutral Check
+    # ----------------------------------------------------
+    # White has low saturation (S < 60 / 255) and adequate brightness (V >= 65 / 255).
+    # Yellow always has S >= 140 under similar conditions.
+    is_neutral = (
+        (s_ocv < 60 and v_ocv >= 65)
+        or (s_ocv < 72 and v_ocv >= 120 and gr_ratio > 0.85)
+    )
+
+    if is_neutral:
+        best_face: CubeFace = "U"
+        confidence = round(max(0.85, min(0.99, 1.0 - (s_ocv / 120.0))), 2)
+        return "white", best_face, hex_map.get(best_face, "#f8fafc"), confidence, hsv_list, rgb_list
+
+    # ----------------------------------------------------
+    # STAGE 2: Explicit Custom Prototype Matching (if calibrated)
+    # ----------------------------------------------------
+    if palette_rgb:
+        scores: list[tuple[CubeFace, float]] = []
+        for f_code, p_rgb in palette_rgb.items():
+            pr, pg, pb = p_rgb
+            p_arr = np.array([[[int(round(pr)), int(round(pg)), int(round(pb))]]], dtype=np.uint8)
+            p_hsv = cv2.cvtColor(p_arr, cv2.COLOR_RGB2HSV)
+            ph = float(p_hsv[0, 0, 0])
+            ps = float(p_hsv[0, 0, 1])
+            pv = float(p_hsv[0, 0, 2])
+
+            if f_code == "U":
+                dist = s_ocv * 1.5 + (255.0 - v_ocv) * 0.2
+            else:
+                h_diff = abs(h_ocv - ph)
+                if h_diff > 90.0:
+                    h_diff = 180.0 - h_diff
+
+                dist = h_diff * 2.5 + abs(s_ocv - ps) * 0.25 + abs(v_ocv - pv) * 0.05
+
+                # Physical penalty for Red vs Orange cross-assignment
+                if f_code == "F" and gr_ratio > 0.40:
+                    dist += 50.0
+                elif f_code == "B" and gr_ratio < 0.28:
+                    dist += 50.0
+
+            scores.append((f_code, dist))
+
+        scores.sort(key=lambda item: item[1])
+        best_face = scores[0][0]
+        second_dist = scores[1][1] if len(scores) > 1 else scores[0][1] + 25.0
+        diff = second_dist - scores[0][1]
+        confidence = round(max(0.75, min(0.99, 0.75 + (diff / 60.0) * 0.24)), 2)
+
+        color_name = FACE_CODE_TO_COLOR.get(best_face, "white")
+        hex_val = hex_map.get(best_face, "#ffffff")
+        return color_name, best_face, hex_val, confidence, hsv_list, rgb_list
+
+    # ----------------------------------------------------
+    # STAGE 3: Baseline Angular Hue Sector Tree (OpenCV scale 0..179)
+    # ----------------------------------------------------
+    if 38 <= h_ocv < 82:
+        best_face = "L"  # Green
+        confidence = 0.95 if 45 <= h_ocv <= 75 else 0.84
+    elif 82 <= h_ocv < 132:
+        best_face = "R"  # Blue
+        confidence = 0.96 if 92 <= h_ocv <= 122 else 0.85
+    elif 18 <= h_ocv < 38:
+        best_face = "D"  # Yellow
+        confidence = 0.95 if 21 <= h_ocv <= 32 else 0.83
+    else:
+        # Red / Orange Zone (H < 18 or H >= 168)
+        if h_ocv < 7 or h_ocv >= 168 or gr_ratio < 0.30:
+            best_face = "F"  # Red
+            confidence = 0.94 if (h_ocv < 5 or h_ocv >= 172 or gr_ratio < 0.25) else 0.82
+        else:
+            best_face = "B"  # Orange
+            confidence = 0.93 if (8 <= h_ocv <= 16 and gr_ratio >= 0.35) else 0.80
+
+    color_name = FACE_CODE_TO_COLOR.get(best_face, "white")
+    hex_val = hex_map.get(best_face, "#ffffff")
+    return color_name, best_face, hex_val, confidence, hsv_list, rgb_list
 
 
 def classify_tile_color_calibrated(
     r: float,
     g: float,
     b: float,
-    palette_lab: dict[CubeFace, tuple[float, float, float]],
+    palette_rgb: dict[CubeFace, tuple[float, float, float]] | None = None,
     palette_hex: dict[CubeFace, str] | None = None,
 ) -> tuple[FaceletColor, CubeFace, str, float, list[int], list[int]]:
-    """Classify a single tile sample by matching against calibrated CIELAB prototypes."""
-    rf, gf, bf = r / 255.0, g / 255.0, b / 255.0
-    h, s, v = colorsys.rgb_to_hsv(rf, gf, bf)
-    hue_deg = round(h * 360.0)
-    sat_pct = round(s * 100.0)
-    val_pct = round(v * 100.0)
-    rgb_list = [int(round(r)), int(round(g)), int(round(b))]
-    hsv_list = [hue_deg, sat_pct, val_pct]
-
-    sample_lab = rgb_to_cielab(r, g, b)
-    hex_map = palette_hex or FACE_CODE_TO_HEX
-
-    distances: list[tuple[CubeFace, float]] = []
-    for face_code, proto_lab in palette_lab.items():
-        is_white = (face_code == "U")
-        dist = calculate_color_distance(sample_lab, proto_lab, is_white_prototype=is_white)
-        distances.append((face_code, dist))
-
-    distances.sort(key=lambda item: item[1])
-    best_face, best_dist = distances[0]
-    second_best_dist = distances[1][1] if len(distances) > 1 else best_dist + 10.0
-
-    # Calculate confidence score based on margin between best and second-best candidate
-    margin = (second_best_dist - best_dist) / (second_best_dist + 1e-5)
-    confidence = round(max(0.65, min(0.99, 0.65 + 0.34 * margin)), 2)
-
-    color_name = FACE_CODE_TO_COLOR.get(best_face, "white")
-    hex_val = hex_map.get(best_face, "#ffffff")
-
-    return color_name, best_face, hex_val, confidence, hsv_list, rgb_list
+    """Convert scalar RGB to OpenCV HSV and classify."""
+    rgb_arr = np.array([[[int(round(r)), int(round(g)), int(round(b))]]], dtype=np.uint8)
+    hsv_arr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2HSV)
+    h_ocv = float(hsv_arr[0, 0, 0])
+    s_ocv = float(hsv_arr[0, 0, 1])
+    v_ocv = float(hsv_arr[0, 0, 2])
+    return classify_hsv_tile(
+        h_ocv, s_ocv, v_ocv, r, g, b, palette_rgb, palette_hex
+    )
 
 
 def classify_tile_color(
     r: float, g: float, b: float
 ) -> tuple[FaceletColor, CubeFace, str, float, list[int], list[int]]:
-    """Legacy helper: classifies tile color using the standard default baseline palette."""
-    default_lab = {
-        face: rgb_to_cielab(*rgb) for face, rgb in DEFAULT_PALETTE_RGB.items()
-    }
-    return classify_tile_color_calibrated(r, g, b, default_lab)
+    """Legacy helper: classifies tile color using the baseline OpenCV HSV pipeline."""
+    return classify_tile_color_calibrated(r, g, b, None)
 
 
 class VisionSession:
@@ -242,9 +302,10 @@ class VisionSession:
         x2 = max(x1 + 10, min(img_w, int((roi.normalizedX + roi.normalizedWidth) * img_w)))
         y2 = max(y1 + 10, min(img_h, int((roi.normalizedY + roi.normalizedHeight) * img_h)))
 
-        np_img = np.array(image)
-        roi_img = np_img[y1:y2, x1:x2]
-        roi_h, roi_w, _ = roi_img.shape
+        np_img = np.array(image, dtype=np.uint8)
+        roi_rgb = np_img[y1:y2, x1:x2]
+        roi_hsv = cv2.cvtColor(roi_rgb, cv2.COLOR_RGB2HSV)
+        roi_h, roi_w, _ = roi_rgb.shape
 
         cell_w = roi_w / 3.0
         cell_h = roi_h / 3.0
@@ -252,25 +313,47 @@ class VisionSession:
         tiles: list[VisionTileDetection] = []
         current_facelet_codes: list[str] = []
 
-        # 3. Sample 3x3 grid cells
+        # 3. Sample 3x3 grid cells using tight circular center spot (matching visual dot)
         tile_idx = 0
-        center_rgb: tuple[float, float, float] | None = None
 
         for r in range(3):
             for c in range(3):
-                # Sample inner 50% of the cell to avoid borders/stickers gap
-                cx1 = int((c + 0.25) * cell_w)
-                cx2 = max(cx1 + 1, int((c + 0.75) * cell_w))
-                cy1 = int((r + 0.25) * cell_h)
-                cy2 = max(cy1 + 1, int((r + 0.75) * cell_h))
+                # Calculate cell center coordinates
+                center_x = (c + 0.5) * cell_w
+                center_y = (r + 0.5) * cell_h
 
-                cell_sample = roi_img[cy1:cy2, cx1:cx2]
-                mean_r = float(np.mean(cell_sample[:, :, 0]))
-                mean_g = float(np.mean(cell_sample[:, :, 1]))
-                mean_b = float(np.mean(cell_sample[:, :, 2]))
+                # Sample tight circular radius around center (16% of cell dimension)
+                # to strictly avoid white speedcube borders, bevels, and inter-cubie gaps
+                rad = max(2, int(min(cell_w, cell_h) * 0.16))
 
-                if tile_idx == 4:
-                    center_rgb = (mean_r, mean_g, mean_b)
+                cy1 = max(0, int(center_y - rad))
+                cy2 = min(roi_h, int(center_y + rad + 1))
+                cx1 = max(0, int(center_x - rad))
+                cx2 = min(roi_w, int(center_x + rad + 1))
+
+                cell_rgb = roi_rgb[cy1:cy2, cx1:cx2]
+                cell_hsv = roi_hsv[cy1:cy2, cx1:cx2]
+
+                # Create circular mask within the sampled square patch
+                ph, pw, _ = cell_rgb.shape
+                py, px = np.ogrid[:ph, :pw]
+                dist_from_center = np.sqrt((px - (pw - 1) / 2.0) ** 2 + (py - (ph - 1) / 2.0) ** 2)
+                circle_mask = dist_from_center <= rad
+
+                if np.any(circle_mask):
+                    sampled_hsv = cell_hsv[circle_mask]
+                    sampled_rgb = cell_rgb[circle_mask]
+                else:
+                    sampled_hsv = cell_hsv.reshape(-1, 3)
+                    sampled_rgb = cell_rgb.reshape(-1, 3)
+
+                median_h = float(np.median(sampled_hsv[:, 0]))
+                mean_s = float(np.mean(sampled_hsv[:, 1]))
+                mean_v = float(np.mean(sampled_hsv[:, 2]))
+
+                mean_r = float(np.mean(sampled_rgb[:, 0]))
+                mean_g = float(np.mean(sampled_rgb[:, 1]))
+                mean_b = float(np.mean(sampled_rgb[:, 2]))
 
                 (
                     color_name,
@@ -279,8 +362,15 @@ class VisionSession:
                     conf,
                     hsv,
                     rgb,
-                ) = classify_tile_color_calibrated(
-                    mean_r, mean_g, mean_b, self.calibrated_lab, self.calibrated_hex
+                ) = classify_hsv_tile(
+                    median_h,
+                    mean_s,
+                    mean_v,
+                    mean_r,
+                    mean_g,
+                    mean_b,
+                    self.calibrated_rgb,
+                    self.calibrated_hex,
                 )
 
                 tiles.append(
@@ -312,19 +402,6 @@ class VisionSession:
         stability_score = round(agreement_sum / 9.0, 2)
         is_ready_to_lock = bool(stability_score >= 0.85 and len(history) >= 3)
 
-        # Layer 2: Auto-adaptive center tile refinement when detection is highly stable
-        if is_ready_to_lock and center_rgb:
-            center_code = FACE_NAME_TO_CODE.get(active_face)
-            if center_code:
-                # Smoothly update prototype with small learning rate (alpha=0.08)
-                cr, cg, cb = center_rgb
-                old_r, old_g, old_b = self.calibrated_rgb[center_code]
-                new_r = 0.92 * old_r + 0.08 * cr
-                new_g = 0.92 * old_g + 0.08 * cg
-                new_b = 0.92 * old_b + 0.08 * cb
-                self.calibrated_rgb[center_code] = (new_r, new_g, new_b)
-                self.calibrated_lab[center_code] = rgb_to_cielab(new_r, new_g, new_b)
-
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         return VisionDetectionResultEvent(
@@ -351,15 +428,6 @@ class VisionSession:
             locked_tiles = override_tiles
         elif self.last_detection_tiles and len(self.last_detection_tiles) == 9:
             locked_tiles = [t.faceletCode for t in self.last_detection_tiles]
-            # Layer 2: Lock in center tile color sample to reference profile
-            center_tile = self.last_detection_tiles[4]
-            if center_tile.rgb and len(center_tile.rgb) == 3:
-                r = float(center_tile.rgb[0])
-                g = float(center_tile.rgb[1])
-                b = float(center_tile.rgb[2])
-                self.calibrated_rgb[face_code] = (r, g, b)
-                self.calibrated_lab[face_code] = rgb_to_cielab(r, g, b)
-                self.calibrated_hex[face_code] = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
         else:
             locked_tiles = [face_code] * 9
 
