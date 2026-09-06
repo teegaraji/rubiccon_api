@@ -1,3 +1,14 @@
+---
+title: Rubiccon Api
+emoji: 🎲
+colorFrom: indigo
+colorTo: purple
+sdk: gradio
+sdk_version: 4.44.1
+app_file: app.py
+pinned: false
+---
+
 # Rubiccon Backend API (FastAPI & Kociemba Solver)
 
 > High-performance microservice providing Rubik's Cube 3x3 real-time computer vision frame analysis, mathematical state validation, and solving capabilities powered by **FastAPI** and the **Kociemba Two-Phase Algorithm**.
