@@ -1,5 +1,5 @@
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
@@ -21,7 +21,7 @@ async def validate_state(request: ValidateRequest) -> ApiResponse[ValidateRespon
         success=True,
         data=data,
         meta=ApiMeta(
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             executionTimeMs=elapsed_ms,
             version=settings.VERSION,
         ),

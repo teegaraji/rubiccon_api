@@ -1,5 +1,5 @@
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
@@ -25,7 +25,7 @@ async def solve_cube_endpoint(request: SolveRequest) -> ApiResponse[SolveRespons
         success=True,
         data=data,
         meta=ApiMeta(
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             executionTimeMs=elapsed_ms,
             version=settings.VERSION,
         ),

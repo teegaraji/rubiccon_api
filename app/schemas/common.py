@@ -1,11 +1,14 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
+
+T = TypeVar("T")
 
 
 class ApiMeta(BaseModel):
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     executionTimeMs: float = 0.0
     version: str = "1.0.0"
@@ -24,7 +27,7 @@ class ApiErrorPayload(BaseModel):
     details: list[ApiErrorDetail] | None = None
 
 
-class ApiResponse[T](BaseModel):
+class ApiResponse(BaseModel, Generic[T]):
     success: bool
     data: T | None = None
     error: ApiErrorPayload | None = None

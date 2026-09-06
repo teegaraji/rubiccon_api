@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -24,7 +24,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "details": exc.details if exc.details else None,
                 },
                 "meta": {
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "executionTimeMs": 0.0,
                     "version": settings.VERSION,
                 },
@@ -45,7 +45,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "details": None,
                 },
                 "meta": {
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "executionTimeMs": 0.0,
                     "version": settings.VERSION,
                 },
@@ -66,7 +66,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "details": exc.details if exc.details else None,
                 },
                 "meta": {
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "executionTimeMs": 0.0,
                     "version": settings.VERSION,
                 },
@@ -97,7 +97,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "details": details,
                 },
                 "meta": {
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "executionTimeMs": 0.0,
                     "version": settings.VERSION,
                 },
@@ -118,7 +118,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "details": None,
                 },
                 "meta": {
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "executionTimeMs": 0.0,
                     "version": settings.VERSION,
                 },
@@ -139,7 +139,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "details": None,
                 },
                 "meta": {
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "executionTimeMs": 0.0,
                     "version": settings.VERSION,
                 },
