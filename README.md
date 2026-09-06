@@ -1,14 +1,3 @@
----
-title: Rubiccon Api
-emoji: 🎲
-colorFrom: indigo
-colorTo: purple
-sdk: gradio
-sdk_version: 5.20.0
-app_file: app.py
-pinned: false
----
-
 # Rubiccon Backend API (FastAPI & Kociemba Solver)
 
 > High-performance microservice providing Rubik's Cube 3x3 real-time computer vision frame analysis, mathematical state validation, and solving capabilities powered by **FastAPI** and the **Kociemba Two-Phase Algorithm**.
@@ -53,6 +42,7 @@ pinned: false
 ### 2. Setup Virtual Environment
 
 Using `uv`:
+
 ```bash
 # Create venv with Python 3.12
 uv venv --python 3.12
@@ -65,6 +55,7 @@ uv pip install -e ".[dev]"
 ```
 
 Using standard `pip`:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
@@ -74,6 +65,7 @@ pip install -r requirements.txt
 ### 3. Environment Configuration
 
 Copy `.env.example` to `.env`:
+
 ```bash
 cp .env.example .env
 ```
@@ -110,6 +102,7 @@ ruff check --fix .
 ### 1. Real-Time Vision WebSocket (`ws://localhost:8000/api/v1/ws/vision`)
 
 **Client Upstream Actions**:
+
 - `init_session`: `{ "action": "init_session", "sessionId": "...", "initialFace": "Front" }`
 - `process_frame`: `{ "action": "process_frame", "frameId": 1, "activeFace": "Front", "timestamp": 1724426400, "image": "data:image/jpeg;base64,..." }`
 - `set_active_face`: `{ "action": "set_active_face", "face": "Right" }`
@@ -117,6 +110,7 @@ ruff check --fix .
 - `reset_session`: `{ "action": "reset_session" }`
 
 **Server Downstream Events**:
+
 - `detection_result`: Returns 9 tile colors, hex, HSV/RGB values, stability score, and `isReadyToLock`.
 - `face_locked`: Confirms face lock, returns completed faces and `nextSuggestedFace`.
 - `session_completed`: Emitted when all 6 faces are mapped, returns 54-char string & validity status.
@@ -125,9 +119,11 @@ ruff check --fix .
 ### 2. REST Endpoints
 
 #### `POST /api/v1/solve`
+
 Computes the move sequence to solve the cube.
 
 **Request:**
+
 ```json
 {
   "state": "BBURUDBFUFFFRRFUUFLULUFUDLRRDBBDBDBLUDDFLLRRBRLLLBRDDF",
@@ -137,9 +133,11 @@ Computes the move sequence to solve the cube.
 ```
 
 #### `POST /api/v1/validate`
+
 Validates a 54-character state string mathematically without calculating moves.
 
 **Request:**
+
 ```json
 {
   "state": "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
@@ -147,6 +145,7 @@ Validates a 54-character state string mathematically without calculating moves.
 ```
 
 #### `GET /api/v1/health`
+
 Health check and microservice status.
 
 ---
