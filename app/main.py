@@ -102,7 +102,7 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
-@app.get("/", tags=["Root"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["Root"])
 async def root():
     return {
         "service": settings.PROJECT_NAME,
@@ -111,4 +111,9 @@ async def root():
         "api_v1": f"{settings.API_V1_PREFIX}/health",
         "ws_vision": f"ws://{settings.HOST}:{settings.PORT}{settings.API_V1_PREFIX}/ws/vision",
     }
+
+
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Health"])
+async def root_health():
+    return {"status": "healthy", "service": settings.PROJECT_NAME}
 

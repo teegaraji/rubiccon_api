@@ -11,7 +11,7 @@ router = APIRouter()
 SERVER_START_TIME = time.time()
 
 
-@router.get("/health", response_model=ApiResponse[HealthResponseData])
+@router.api_route("/health", methods=["GET", "HEAD"], response_model=ApiResponse[HealthResponseData])
 async def get_health() -> ApiResponse[HealthResponseData]:
     start_time = time.perf_counter()
     uptime = round(time.time() - SERVER_START_TIME, 2)
